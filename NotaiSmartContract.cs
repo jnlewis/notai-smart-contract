@@ -3,9 +3,7 @@ using System.ComponentModel;
 using Neo.SmartContract.Framework;
 using Neo.SmartContract.Framework.Services;
 using Neo;
-using Neo.SmartContract;
 using Neo.SmartContract.Framework.Native;
-using System.Numerics;
 
 namespace NotaiSmartContract
 {
@@ -14,11 +12,8 @@ namespace NotaiSmartContract
     [ManifestExtra("Email", "jeffreynlewis@outlook.com")]
     [ManifestExtra("Description", "The NOTAI Smart Contract to facilitate payment management.")]
     [ContractPermission("*")]
-    public class NotaiSmartContract : SmartContract
+    public partial class NotaiSmartContract : SmartContract
     {
-        [InitialValue("NTYVRPprQanDRYY6nFsEnrKMurypDXa45t", ContractParameterType.Hash160)]
-        static readonly UInt160 Owner = default!;
-
         #region Notifications
 
         [DisplayName("PaymentCreated")]
@@ -37,7 +32,9 @@ namespace NotaiSmartContract
         // For example, this method needs to be called when withdrawing token from the contract.
         public static bool Verify() => IsOwner();
 
-        private static bool IsOwner() => Runtime.CheckWitness(Owner);
+        private static bool IsOwner() => Runtime.CheckWitness(MetadataStorageGetOwner());
+
+        public static string Owner() => MetadataStorageGetOwner().ToString();
 
         public static bool Main()
         {
@@ -48,12 +45,16 @@ namespace NotaiSmartContract
         {
             if (update) return;
 
+            // Set the account used to deploy this contract as owner
+            var tx = (Transaction) Runtime.ScriptContainer;
+            var owner = tx.Sender;
+
             // Check if contract is already deployed
-            if (MetadataStorage.IsDeployed()) {
+            if (MetadataStorageGetOwner() != UInt160.Zero) {
                 throw new Exception("Contract has already been deployed.");
             }
 
-            MetadataStorage.SetIsDeployed(true);
+            MetadataStorageSetOwner(owner);
 
             Runtime.Log("_deploy: Completed");
         }
@@ -76,18 +77,30 @@ namespace NotaiSmartContract
     
         #region Payments
 
+        public static Payment GetPayment(UInt160 paymentId)
+        {
+            Runtime.Log("GetPayment: Begin");
+            return PaymentStorageGet(paymentId);
+        }
+        
+        public static List<string> GetPaymentIdsByCreator(UInt160 creatorAddress)
+        {
+            Runtime.Log("GetPaymentIdsByCreator: Begin");
+            return PaymentStorageGetCreatorPayment(creatorAddress);
+        }
+
         public static void CreatePayment(UInt160 paymentId, Payment payment)
         {
             Runtime.Log("CreatePayment: Begin");
 
             // TODO: verify that invoker is the creator (or verify creatorAddress is signed?)
-            if (!Runtime.CheckWitness(payment.CreatorAddress)) 
-            {
-                throw new Exception("Check your signature.");
-            }
+            // if (!Runtime.CheckWitness(payment.CreatorAddress)) 
+            // {
+            //     throw new Exception("Check your signature.");
+            // }
 
             // Check if payment already exist
-            if (PaymentStorage.Get(paymentId).PaymentId == null) {
+            if (PaymentStorageGet(paymentId).PaymentId == null) {
                 throw new Exception("Payment already exist.");
             }
 
@@ -99,7 +112,8 @@ namespace NotaiSmartContract
             }
 
             // Add payment
-            PaymentStorage.Put(paymentId, payment);
+            PaymentStoragePut(paymentId, payment);
+            PaymentStorageAddCreatorPayment(payment.CreatorAddress, paymentId);
 
             // Fire event
             OnPaymentCreated(paymentId);
@@ -111,7 +125,7 @@ namespace NotaiSmartContract
             Runtime.Log("CancelPayment: Begin");
 
             // Get payment
-            var payment = PaymentStorage.Get(paymentId);
+            var payment = PaymentStorageGet(paymentId);
             if (payment.PaymentId == null) 
             {
                 throw new Exception("Payment not found.");
@@ -136,7 +150,7 @@ namespace NotaiSmartContract
             }
 
             // Update payment status
-            PaymentStorage.UpdateStatus(paymentId, "cancelled");
+            PaymentStorageUpdateStatus(paymentId, "cancelled");
             
             // Fire event
             OnPaymentCancelled(paymentId);
@@ -148,7 +162,7 @@ namespace NotaiSmartContract
             Runtime.Log("ReleasePayment: Begin");
 
             // Get payment
-            var payment = PaymentStorage.Get(paymentId);
+            var payment = PaymentStorageGet(paymentId);
             if (payment.PaymentId == null) 
             {
                 throw new Exception("Payment not found.");
@@ -245,7 +259,7 @@ namespace NotaiSmartContract
                 }
 
                 // Update payment status
-                PaymentStorage.UpdateStatus(payment.PaymentId, "released");
+                PaymentStorageUpdateStatus(payment.PaymentId, "released");
                 
                 // Fire event
                 OnPaymentReleased(payment.PaymentId);
