@@ -9,16 +9,16 @@ namespace NotaiSmartContract
 {
     public partial class NotaiSmartContract
     {
-        public static readonly string PAYMENT_MAPNAME = "PAYMENT";
-        public static readonly string PAYMENTCREATOR_MAPNAME = "PAYMENTCREATOR";
+        private static readonly string PAYMENT_MAPNAME = "PAYMENT";
+        private static readonly string PAYMENTCREATOR_MAPNAME = "PAYMENTCREATOR";
 
-        public static void PaymentStoragePut(UInt160 paymentId, Payment payment) 
+        private static void PaymentStoragePut(UInt160 paymentId, Payment payment) 
         {
             var storageMap = new StorageMap(Storage.CurrentContext, PAYMENT_MAPNAME);
             storageMap.Put(paymentId, StdLib.Serialize(payment));
         }
 
-        public static Payment PaymentStorageGet(UInt160 paymentId) 
+        private static Payment PaymentStorageGet(UInt160 paymentId) 
         {
             var storageMap = new StorageMap(Storage.CurrentContext, PAYMENT_MAPNAME);
             ByteString value = storageMap.Get(paymentId);
@@ -30,7 +30,7 @@ namespace NotaiSmartContract
             return payment;
         }
 
-        public static void PaymentStorageUpdateStatus(UInt160 paymentId, string newStatus) 
+        private static void PaymentStorageUpdateStatus(UInt160 paymentId, string newStatus) 
         {
             var payment = PaymentStorageGet(paymentId);
             if (payment.PaymentId != null) {
@@ -39,9 +39,9 @@ namespace NotaiSmartContract
             }
         }
         
-        public static void PaymentStorageAddCreatorPayment(UInt160 creator, UInt160 paymentId) 
+        private static void PaymentStorageAddCreatorPayment(UInt160 creator, UInt160 paymentId) 
         {
-            List<string> currentPayments = PaymentStorageGetCreatorPayment(creator);
+            List<UInt160> currentPayments = PaymentStorageGetCreatorPayment(creator);
             currentPayments.Add(paymentId);
             
             var storageMap = new StorageMap(Storage.CurrentContext, PAYMENTCREATOR_MAPNAME);
@@ -49,15 +49,15 @@ namespace NotaiSmartContract
 
         }
         
-        public static List<string> PaymentStorageGetCreatorPayment(UInt160 creator) 
+        private static List<UInt160> PaymentStorageGetCreatorPayment(UInt160 creator) 
         {
             var storageMap = new StorageMap(Storage.CurrentContext, PAYMENTCREATOR_MAPNAME);
             ByteString value = storageMap.Get(creator);
             if (value is null) {
-                return new List<string>();
+                return new List<UInt160>();
             }
 
-            List<string> creatorPayments = (List<string>)StdLib.Deserialize(value);
+            List<UInt160> creatorPayments = (List<UInt160>)StdLib.Deserialize(value);
             return creatorPayments;
         }
     }

@@ -1,19 +1,23 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Numerics;
+using Neo;
+using Neo.SmartContract;
 using Neo.SmartContract.Framework;
 using Neo.SmartContract.Framework.Services;
-using Neo;
 using Neo.SmartContract.Framework.Native;
 
 namespace NotaiSmartContract
 {
-    [DisplayName("NotaiBetaSmartContract")]
+    [DisplayName("NotaiSmartContract")]
     [ManifestExtra("Author", "Jeffrey Lewis")]
     [ManifestExtra("Email", "jeffreynlewis@outlook.com")]
     [ManifestExtra("Description", "The NOTAI Smart Contract to facilitate payment management.")]
     [ContractPermission("*")]
     public partial class NotaiSmartContract : SmartContract
     {
+        static readonly ulong DefaultServiceFee = 50000000; // 0.5 GAS
+
         #region Notifications
 
         [DisplayName("PaymentCreated")]
@@ -34,13 +38,6 @@ namespace NotaiSmartContract
 
         private static bool IsOwner() => Runtime.CheckWitness(MetadataStorageGetOwner());
 
-        public static string Owner() => MetadataStorageGetOwner().ToString();
-
-        public static bool Main()
-        {
-            return true;
-        }
-
         public static void _deploy(object data, bool update)
         {
             if (update) return;
@@ -55,6 +52,7 @@ namespace NotaiSmartContract
             }
 
             MetadataStorageSetOwner(owner);
+            MetadataStorageSetServiceFee(DefaultServiceFee);
 
             Runtime.Log("_deploy: Completed");
         }
@@ -73,110 +71,173 @@ namespace NotaiSmartContract
             ContractManagement.Destroy();
         }
 
+        public static void UpdateServiceFee(BigInteger serviceFeeGas)
+        {
+            if (!IsOwner()) throw new Exception("No authorization.");
+            MetadataStorageSetServiceFee(serviceFeeGas);
+        }
+
+        public static BigInteger GetServiceFee()
+        {
+            return MetadataStorageGetServiceFee();
+        }
+
         #endregion
-    
+
         #region Payments
 
         public static Payment GetPayment(UInt160 paymentId)
         {
-            Runtime.Log("GetPayment: Begin");
             return PaymentStorageGet(paymentId);
         }
-        
-        public static List<string> GetPaymentIdsByCreator(UInt160 creatorAddress)
+
+        public static List<Payment> GetPaymentsByCreator(UInt160 creatorAddress)
         {
-            Runtime.Log("GetPaymentIdsByCreator: Begin");
+            List<Payment> payments= new List<Payment>();
+
+            var paymentIds = GetPaymentIdsByCreator(creatorAddress);
+            foreach (UInt160 paymentId in paymentIds) {
+                payments.Add(PaymentStorageGet(paymentId));
+            }
+
+            return payments;
+        }
+        
+        public static List<UInt160> GetPaymentIdsByCreator(UInt160 creatorAddress)
+        {
             return PaymentStorageGetCreatorPayment(creatorAddress);
         }
 
-        public static void CreatePayment(UInt160 paymentId, Payment payment)
+        public static void CreatePayment(
+            UInt160 paymentId,
+            UInt160 creatorAddress,
+            UInt160 recipientAddress,
+            string paymentIdString,
+            string creatorAddressString,
+            string recipientAddressString,
+            string title,
+            string asset,
+            BigInteger amount,
+            ulong expiry,
+            string status,
+            string conditionApi,
+            string conditionField,
+            string conditionFieldType,
+            string conditionOperator,
+            string conditionValue)
         {
-            Runtime.Log("CreatePayment: Begin");
-
-            // TODO: verify that invoker is the creator (or verify creatorAddress is signed?)
-            // if (!Runtime.CheckWitness(payment.CreatorAddress)) 
-            // {
-            //     throw new Exception("Check your signature.");
-            // }
+            // Verify that invoker is the creator
+            if (!Runtime.CheckWitness(creatorAddress)) 
+            {
+                throw new Exception("CreatePayment: Invoker must be payment creator.");
+            }
 
             // Check if payment already exist
-            if (PaymentStorageGet(paymentId).PaymentId == null) {
-                throw new Exception("Payment already exist.");
+            if (PaymentStorageGet(paymentId).PaymentId != null) {
+                throw new Exception("CreatePayment: Payment already exist.");
             }
 
             // Transfer from sender to escrow (contract)
-            UInt160 assetHash =  GetAssetHash(payment.Asset);
-            bool isTransferred = (bool)Contract.Call(assetHash, "transfer", CallFlags.All, new object[] { payment.CreatorAddress, Runtime.ExecutingScriptHash, payment.Amount, 0 });
-            if (!isTransferred) {
-                throw new Exception("Failed to transfer from payment creator to escrow.");
-            }
-
+            Runtime.Log("CreatePayment: Transfering assets.");
+            UInt160 assetHash =  GetAssetHash(asset);
+            bool isTransferred = (bool)Contract.Call(assetHash, "transfer", CallFlags.All, new object[] { creatorAddress, Runtime.ExecutingScriptHash, amount, 0 });
+            // bool isTransferred = GAS.Transfer(creatorAddress, MetadataStorageGetOwner(), amount);
+            // TODO: Temporary disabled
+            // if (!isTransferred) {
+            //     throw new Exception("Failed to transfer from payment creator to escrow.");
+            // }
+            
             // Add payment
+            Runtime.Log("CreatePayment: Saving payment.");
+            Payment payment = new Payment()
+            {
+                PaymentId = paymentId,
+                CreatorAddress = creatorAddress,
+                RecipientAddress = recipientAddress,
+                PaymentIdString = paymentIdString,
+                CreatorAddressString = creatorAddressString,
+                RecipientAddressString = recipientAddressString,
+                Title = title,
+                Asset = asset,
+                Amount = amount,
+                Expiry = expiry,
+                Status = status,
+                ConditionApi = conditionApi,
+                ConditionField = conditionField,
+                ConditionFieldType = conditionFieldType,
+                ConditionOperator = conditionOperator,
+                ConditionValue = conditionValue
+            };
             PaymentStoragePut(paymentId, payment);
             PaymentStorageAddCreatorPayment(payment.CreatorAddress, paymentId);
 
             // Fire event
             OnPaymentCreated(paymentId);
-            Runtime.Log("CreatePayment: Fired notification OnPaymentCreated.");
         }
 
         public static void CancelPayment(UInt160 paymentId)
         {
-            Runtime.Log("CancelPayment: Begin");
-
             // Get payment
             var payment = PaymentStorageGet(paymentId);
             if (payment.PaymentId == null) 
             {
-                throw new Exception("Payment not found.");
+                throw new Exception("CancelPayment: Payment not found.");
             }
 
             // Verification
             if (payment.Status != "open") 
             {
-                throw new Exception("Payment status is not open.");
+                throw new Exception("CancelPayment: Payment status is not open.");
             }
             if (Runtime.Time < payment.Expiry)
             {
-                throw new Exception("Payment cannot be cancelled as it is not yet expired.");
+                throw new Exception("CancelPayment: Payment cannot be cancelled as it is not yet expired.");
             }
-            // TODO: verify that invoker is the creator
+
+            // Verify that invoker is the creator
+            if (!Runtime.CheckWitness(payment.CreatorAddress)) 
+            {
+                throw new Exception("CancelPayment: Invoker must be payment creator.");
+            }
+
+            BigInteger amountPlusFee = payment.Amount + MetadataStorageGetServiceFee();
 
             // Transfer from escrow (contract) to sender
+            Runtime.Log("CancelPayment: Transfering assets.");
             UInt160 assetHash =  GetAssetHash(payment.Asset);
-            bool isTransferred = (bool)Contract.Call(assetHash, "transfer", CallFlags.All, new object[] { Runtime.ExecutingScriptHash, payment.CreatorAddress, payment.Amount, 0 });
-            if (!isTransferred) {
-                throw new Exception("Failed to transfer from escrow to payment creator.");
-            }
+            bool isTransferred = (bool)Contract.Call(assetHash, "transfer", CallFlags.All, new object[] { Runtime.ExecutingScriptHash, payment.CreatorAddress, amountPlusFee, 0 });
+            // TODO: Temporary disabled
+            // if (!isTransferred) {
+            //     throw new Exception("Failed to transfer from escrow to payment creator.");
+            // }
 
             // Update payment status
             PaymentStorageUpdateStatus(paymentId, "cancelled");
             
             // Fire event
             OnPaymentCancelled(paymentId);
-            Runtime.Log("CancelPayment: Fired notification OnPaymentCancelled.");
         }
 
         public static void ReleasePayment(UInt160 paymentId)
         {
-            Runtime.Log("ReleasePayment: Begin");
-
             // Get payment
             var payment = PaymentStorageGet(paymentId);
             if (payment.PaymentId == null) 
             {
-                throw new Exception("Payment not found.");
+                throw new Exception("ReleasePayment: Payment not found.");
             }
 
             // Verification
             if (payment.Status != "open") 
             {
-                throw new Exception("Payment status is not open.");
+                throw new Exception("ReleasePayment: Payment status is not open.");
             }
             if (Runtime.Time >= payment.Expiry)
             {
-                throw new Exception("Payment cannot be released as it has already expired.");
+                throw new Exception("ReleasePayment: Payment cannot be released as it has already expired.");
             }
+
+            PaymentStorageUpdateStatus(payment.PaymentId, "verification");
 
             // Verify payment condition
             Oracle.Request(
@@ -199,7 +260,7 @@ namespace NotaiSmartContract
 
             if (code != OracleResponseCode.Success) 
             {
-                throw new Exception("Oracle response failure with code " + (byte)code);
+                throw new Exception("OracleCallback: Oracle response failure with code " + (byte)code);
             }
 
             // Check condition match
@@ -209,12 +270,6 @@ namespace NotaiSmartContract
                 return;
             }
             object[] queryArray = (object[])queryData;
-            // object[] queryArray = queryData as object[];
-            // if (queryArray == null || queryArray.Length == 0) {
-            //     Runtime.Log("OracleCallback: Query result is empty.");
-            //     return;
-            // }
-
             string queryValue = (string)queryArray[0];
 
             Runtime.Log("OracleCallback: Query value: " + queryValue);
@@ -253,10 +308,11 @@ namespace NotaiSmartContract
                 // Transfer from escrow (contract) to recipient
                 UInt160 assetHash =  GetAssetHash(payment.Asset);
                 bool isTransferred = (bool)Contract.Call(assetHash, "transfer", CallFlags.All, new object[] { Runtime.ExecutingScriptHash, payment.RecipientAddress, payment.Amount, 0 });
-                if (!isTransferred) 
-                {
-                    throw new Exception("Failed to transfer from escrow to payment recipient.");
-                }
+                // TODO: Temporary disabled
+                // if (!isTransferred) 
+                // {
+                //     throw new Exception("Failed to transfer from escrow to payment recipient.");
+                // }
 
                 // Update payment status
                 PaymentStorageUpdateStatus(payment.PaymentId, "released");
@@ -267,11 +323,13 @@ namespace NotaiSmartContract
             }
             else
             {
+                PaymentStorageUpdateStatus(payment.PaymentId, "open");
                 Runtime.Log("OracleCallback: Condition not met.");
             }
         }
 
-        private static UInt160 GetAssetHash(string assetName) {
+        private static UInt160 GetAssetHash(string assetName) 
+        {
             if (assetName == "NEO") {
                 return NEO.Hash;
             }

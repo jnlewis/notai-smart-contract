@@ -8,6 +8,9 @@ namespace NotaiSmartContract
         public UInt160 PaymentId;
         public UInt160 CreatorAddress;
         public UInt160 RecipientAddress;
+        public string PaymentIdString;
+        public string CreatorAddressString;
+        public string RecipientAddressString;
         public string Title;
         public string Asset;
         public BigInteger Amount;
