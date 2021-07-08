@@ -38,6 +38,8 @@ namespace NotaiSmartContract
 
         private static bool IsOwner() => Runtime.CheckWitness(MetadataStorageGetOwner());
 
+        public static UInt160 Owner() => MetadataStorageGetOwner();
+
         public static void _deploy(object data, bool update)
         {
             if (update) return;
@@ -48,7 +50,7 @@ namespace NotaiSmartContract
 
             // Check if contract is already deployed
             if (MetadataStorageGetOwner() != UInt160.Zero) {
-                throw new Exception("Contract has already been deployed.");
+                throw new Exception("_deploy: Contract has already been deployed.");
             }
 
             MetadataStorageSetOwner(owner);
@@ -67,13 +69,13 @@ namespace NotaiSmartContract
 
         public static void Destroy()
         {
-            if (!IsOwner()) throw new Exception("No authorization.");
+            if (!IsOwner()) throw new Exception("Destroy: No authorization.");
             ContractManagement.Destroy();
         }
 
         public static void UpdateServiceFee(BigInteger serviceFeeGas)
         {
-            if (!IsOwner()) throw new Exception("No authorization.");
+            if (!IsOwner()) throw new Exception("UpdateServiceFee: No authorization.");
             MetadataStorageSetServiceFee(serviceFeeGas);
         }
 
