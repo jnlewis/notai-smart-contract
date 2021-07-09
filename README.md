@@ -73,7 +73,7 @@ The alpha preview of the application is available here and is connected to the N
 
 ## NEO Frontier Hackathon
 
-The project will be submitted as a hackathon entry on the NEO Frontier Blockchain Launchpad. The project plan document submitted in the first part of the hackathon can be found <a href="https://github.com/jnlewis/notai/blob/master/docs/Planathon.md">here</a>
+The project will be submitted as a hackathon entry on the NEO Frontier Blockchain Launchpad. The project plan document submitted in the first part of the hackathon can be found <a href="https://github.com/jnlewis/notai-web/blob/main/docs/Planathon.md">here</a>
 
 ## Screenshots
 
