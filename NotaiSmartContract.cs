@@ -141,13 +141,22 @@ namespace NotaiSmartContract
 
             // Transfer from sender to escrow (contract)
             Runtime.Log("CreatePayment: Transfering assets.");
+
+            // TODO: Check sender balance
+
+            // Service Fee payment
+            bool isFeeTransferred = GAS.Transfer(creatorAddress, MetadataStorageGetOwner(), DefaultServiceFee);
+            if (!isFeeTransferred) {
+                Runtime.Log("CreatePayment: Failed to transfer fee from payment creator to owner.");
+            }
+            
+            // NEP-17 Asset transfer to escrow
             UInt160 assetHash =  GetAssetHash(asset);
             bool isTransferred = (bool)Contract.Call(assetHash, "transfer", CallFlags.All, new object[] { creatorAddress, Runtime.ExecutingScriptHash, amount, 0 });
-            // bool isTransferred = GAS.Transfer(creatorAddress, MetadataStorageGetOwner(), amount);
-            // TODO: Temporary disabled
-            // if (!isTransferred) {
-            //     throw new Exception("Failed to transfer from payment creator to escrow.");
-            // }
+            if (!isTransferred) {
+                // throw new Exception("Failed to transfer from payment creator to escrow.");
+                Runtime.Log("CreatePayment: Failed to transfer from payment creator to escrow.");
+            }
             
             // Add payment
             Runtime.Log("CreatePayment: Saving payment.");
@@ -208,10 +217,10 @@ namespace NotaiSmartContract
             Runtime.Log("CancelPayment: Transfering assets.");
             UInt160 assetHash =  GetAssetHash(payment.Asset);
             bool isTransferred = (bool)Contract.Call(assetHash, "transfer", CallFlags.All, new object[] { Runtime.ExecutingScriptHash, payment.CreatorAddress, amountPlusFee, 0 });
-            // TODO: Temporary disabled
-            // if (!isTransferred) {
-            //     throw new Exception("Failed to transfer from escrow to payment creator.");
-            // }
+            if (!isTransferred) {
+                // throw new Exception("CancelPayment: Failed to transfer from escrow to payment creator.");
+                Runtime.Log("CancelPayment: Failed to transfer from escrow to payment creator.");
+            }
 
             // Update payment status
             PaymentStorageUpdateStatus(paymentId, "cancelled");
@@ -266,7 +275,7 @@ namespace NotaiSmartContract
             }
 
             // Check condition match
-            object queryData = StdLib.JsonDeserialize(result); // [ "hello world" ]
+            object queryData = StdLib.JsonDeserialize(result);
             if (queryData == null) {
                 Runtime.Log("OracleCallback: Query result is null.");
                 return;
@@ -283,7 +292,6 @@ namespace NotaiSmartContract
                     isConditionMet = (queryValue == payment.ConditionValue);
                 }
             }
-
             if (payment.ConditionFieldType == "number" && IsNumeric(queryValue) && IsNumeric(payment.ConditionValue)) 
             {
                 if (payment.ConditionOperator == "=") {
@@ -302,7 +310,24 @@ namespace NotaiSmartContract
                     isConditionMet = StringToNumber(queryValue) <= StringToNumber(payment.ConditionValue);
                 }
             }
-            // TODO: Add support for DateTime type
+            if (payment.ConditionFieldType == "datetime") 
+            {
+                if (payment.ConditionOperator == "=") {
+                    isConditionMet = StringToUnixTime(queryValue) == StringToUnixTime(payment.ConditionValue);
+                }
+                if (payment.ConditionOperator == ">") {
+                    isConditionMet = StringToUnixTime(queryValue) > StringToUnixTime(payment.ConditionValue);
+                }
+                if (payment.ConditionOperator == ">=") {
+                    isConditionMet = StringToUnixTime(queryValue) >= StringToUnixTime(payment.ConditionValue);
+                }
+                if (payment.ConditionOperator == "<") {
+                    isConditionMet = StringToUnixTime(queryValue) < StringToUnixTime(payment.ConditionValue);
+                }
+                if (payment.ConditionOperator == "<=") {
+                    isConditionMet = StringToUnixTime(queryValue) <= StringToUnixTime(payment.ConditionValue);
+                }
+            }
 
             if (isConditionMet) {
                 Runtime.Log("OracleCallback: Condition met, releasing payment.");
@@ -310,11 +335,11 @@ namespace NotaiSmartContract
                 // Transfer from escrow (contract) to recipient
                 UInt160 assetHash =  GetAssetHash(payment.Asset);
                 bool isTransferred = (bool)Contract.Call(assetHash, "transfer", CallFlags.All, new object[] { Runtime.ExecutingScriptHash, payment.RecipientAddress, payment.Amount, 0 });
-                // TODO: Temporary disabled
-                // if (!isTransferred) 
-                // {
-                //     throw new Exception("Failed to transfer from escrow to payment recipient.");
-                // }
+                if (!isTransferred) 
+                {
+                    // throw new Exception("Failed to transfer from escrow to payment recipient.");
+                    Runtime.Log("OracleCallback: Failed to transfer from escrow to payment recipient.");
+                }
 
                 // Update payment status
                 PaymentStorageUpdateStatus(payment.PaymentId, "released");
@@ -359,6 +384,22 @@ namespace NotaiSmartContract
         private static long StringToNumber(string value) 
         {
             return long.Parse(value);
+        }
+
+        private static long StringToUnixTime(string value) 
+        {
+            throw new Exception("Datetime type is currently not supported.");
+            // TODO:
+            // try
+            // {
+            //     DateTime date = DateTime.Parse(value);
+            //     long unixTime = ((DateTimeOffset)date).ToUnixTimeSeconds();
+            //     return unixTime;
+            // }
+            // catch
+            // {
+            //     return 0;
+            // }
         }
 
         #endregion
